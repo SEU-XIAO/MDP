@@ -17,7 +17,7 @@ from src.replay.per_buffer import PrioritizedReplayBuffer
 @dataclass
 class AgentConfig:
     gamma: float = 0.99
-    learning_rate: float = 1e-4
+    learning_rate: float = 5e-5
     target_update_interval: int = 500
     batch_size: int = 64
     grad_clip: float = 10.0

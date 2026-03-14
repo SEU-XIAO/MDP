@@ -6,8 +6,8 @@ from pathlib import Path
 import numpy as np
 
 from src.agent.d3qn_agent import D3QNAgent
-from src.config import load_scenario
-from src.environment.risk_grid_env import RiskAwareGridEnv
+from src.config import TrainConfig, load_scenario
+from src.environment.risk_grid_env import RewardWeights, RiskAwareGridEnv
 from src.replay.per_buffer import PrioritizedReplayBuffer
 
 
@@ -16,15 +16,48 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--scenario", type=str, default="configs/scenario.json")
     parser.add_argument("--model", type=str, default="checkpoints/best_model.pt")
     parser.add_argument("--episodes", type=int, default=20)
+    parser.add_argument("--enemy-jitter", type=int, default=None)
+    parser.add_argument("--start-jitter", type=int, default=None)
+    parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--device", type=str, default=None)
     return parser.parse_args()
 
 
+def _resolve_model_path(path_text: str) -> Path:
+    p = Path(path_text)
+    if p.exists():
+        return p
+    fallback = Path("checkpoints") / p.name
+    if fallback.exists():
+        return fallback
+    raise FileNotFoundError(f"Model file not found: {p}")
+
+
 def main() -> None:
     args = parse_args()
+    cfg = TrainConfig()
     scenario = load_scenario(args.scenario)
+    enemy_jitter = cfg.eval_enemy_jitter if args.enemy_jitter is None else args.enemy_jitter
+    start_jitter = cfg.eval_start_jitter if args.start_jitter is None else args.start_jitter
 
-    env = RiskAwareGridEnv(scenario=scenario, observation_size=64, max_steps=220)
+    reward_weights = RewardWeights(
+        goal_reward=cfg.goal_reward,
+        step_penalty=cfg.step_penalty,
+        risk_lambda=cfg.risk_lambda,
+        guide_omega=cfg.guide_omega,
+        timeout_penalty=cfg.timeout_penalty,
+        blocked_move_penalty=cfg.blocked_move_penalty,
+    )
+    env = RiskAwareGridEnv(
+        scenario=scenario,
+        observation_size=cfg.observation_size,
+        max_steps=cfg.max_steps_per_episode,
+        enemy_jitter=enemy_jitter,
+        start_jitter=start_jitter,
+        reward_weights=reward_weights,
+        blocked_risk_threshold=cfg.high_risk_block_threshold,
+        seed=args.seed,
+    )
     replay_stub = PrioritizedReplayBuffer(capacity=1)
     agent = D3QNAgent(
         state_shape=env.observation_space.shape,
@@ -33,9 +66,7 @@ def main() -> None:
         device=args.device,
     )
 
-    model_path = Path(args.model)
-    if not model_path.exists():
-        raise FileNotFoundError(f"Model file not found: {model_path}")
+    model_path = _resolve_model_path(args.model)
     agent.load(model_path)
 
     rewards = []
@@ -63,6 +94,7 @@ def main() -> None:
 
     print(f"Model: {model_path}")
     print(f"Episodes: {args.episodes}")
+    print(f"Jitter: enemy={enemy_jitter}, start={start_jitter}")
     print(f"Success rate: {success / args.episodes:.2%}")
     print(f"Average reward: {np.mean(rewards):.2f}")
     print(f"Average step risk: {np.mean(mean_risks):.4f}")

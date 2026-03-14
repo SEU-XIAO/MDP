@@ -31,12 +31,14 @@ class TrainConfig:
     goal_reward: float = 180.0
     step_penalty: float = -1.0
     timeout_penalty: float = -60.0
-    enemy_jitter: int = 0
-    start_jitter: int = 0
+    blocked_move_penalty: float = -8.0
+    high_risk_block_threshold: float = 0.95
+    enemy_jitter: int = 1
+    start_jitter: int = 1
     eval_interval_episodes: int = 50
     eval_episodes: int = 30
-    eval_enemy_jitter: int = 0
-    eval_start_jitter: int = 0
+    eval_enemy_jitter: int = 1
+    eval_start_jitter: int = 1
     observation_size: int = 64
     seed: int = 42
 

@@ -17,6 +17,7 @@ class RewardWeights:
     risk_lambda: float = 5.0
     guide_omega: float = 0.7
     timeout_penalty: float = -60.0
+    blocked_move_penalty: float = -8.0
 
 
 class RiskAwareGridEnv(gym.Env[np.ndarray, int]):
@@ -42,6 +43,7 @@ class RiskAwareGridEnv(gym.Env[np.ndarray, int]):
         start_jitter: int = 2,
         reward_weights: RewardWeights | None = None,
         goal_sigma: float = 10.0,
+        blocked_risk_threshold: float | None = None,
         seed: int | None = None,
     ) -> None:
         super().__init__()
@@ -56,6 +58,7 @@ class RiskAwareGridEnv(gym.Env[np.ndarray, int]):
         self.enemy_jitter = enemy_jitter
         self.start_jitter = start_jitter
         self.goal_sigma = goal_sigma
+        self.blocked_risk_threshold = blocked_risk_threshold
         self.reward_weights = reward_weights or RewardWeights()
 
         self.observation_space = spaces.Box(
@@ -98,7 +101,11 @@ class RiskAwareGridEnv(gym.Env[np.ndarray, int]):
         dx, dy = self.ACTIONS[action]
         nx = int(np.clip(prev_pos[0] + dx, 0, self.world_size - 1))
         ny = int(np.clip(prev_pos[1] + dy, 0, self.world_size - 1))
-        self.agent_pos = (nx, ny)
+        blocked = self._is_blocked_by_risk((nx, ny))
+        if blocked:
+            self.agent_pos = prev_pos
+        else:
+            self.agent_pos = (nx, ny)
 
         curr_dist = self._distance_to_goal(self.agent_pos)
         risk_prob = self._risk_at(self.agent_pos)
@@ -108,13 +115,14 @@ class RiskAwareGridEnv(gym.Env[np.ndarray, int]):
         r_risk = -self.reward_weights.risk_lambda * (risk_prob**2)
         r_guide = self.reward_weights.guide_omega * (prev_dist - curr_dist)
         r_timeout = 0.0
+        r_blocked = self.reward_weights.blocked_move_penalty if blocked else 0.0
 
         terminated = self.agent_pos == self.goal_pos
         truncated = self.step_count >= self.max_steps
         if truncated and not terminated:
             r_timeout = self.reward_weights.timeout_penalty
 
-        reward = r_goal + r_step + r_risk + r_guide + r_timeout
+        reward = r_goal + r_step + r_risk + r_guide + r_timeout + r_blocked
 
         obs = self._build_observation(self.agent_pos)
         info = {
@@ -126,9 +134,15 @@ class RiskAwareGridEnv(gym.Env[np.ndarray, int]):
                 "risk": r_risk,
                 "guide": r_guide,
                 "timeout": r_timeout,
+                "blocked": r_blocked,
             },
         }
         return obs, float(reward), terminated, truncated, info
+
+    def _is_blocked_by_risk(self, pos: tuple[int, int]) -> bool:
+        if self.blocked_risk_threshold is None:
+            return False
+        return self._risk_at(pos) >= float(self.blocked_risk_threshold)
 
     def heuristic_action(self) -> int:
         best_action = 0

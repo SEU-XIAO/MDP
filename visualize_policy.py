@@ -5,10 +5,11 @@ from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
+from matplotlib.patches import Circle
 
 from src.agent.d3qn_agent import D3QNAgent
-from src.config import load_scenario
-from src.environment.risk_grid_env import RiskAwareGridEnv
+from src.config import TrainConfig, load_scenario
+from src.environment.risk_grid_env import RewardWeights, RiskAwareGridEnv
 from src.replay.per_buffer import PrioritizedReplayBuffer
 
 
@@ -51,8 +52,21 @@ def visualize_episode(
     fig, ax = plt.subplots(figsize=(7.5, 7.5))
     fig.canvas.manager.set_window_title(f"Policy Visualization - Episode {episode_index}")
 
-    risk_image = ax.imshow(state[0], origin="lower", cmap="magma", vmin=0.0, vmax=1.0)
+    risk_image = ax.imshow(state[0], origin="lower", cmap="magma", vmin=0.0, vmax=1.0, interpolation="bicubic")
     plt.colorbar(risk_image, ax=ax, fraction=0.046, pad=0.04, label="Risk Probability")
+
+    scale = (env.observation_size - 1) / max(env.world_size - 1, 1)
+    zone_colors = ["#ef4444", "#f97316", "#facc15", "#22c55e"]
+    for enemy in env.current_enemies:
+        ex, ey = env._world_to_obs(tuple(enemy["pos"]))
+        zones = sorted(enemy["detection_zones"], key=lambda z: z["r"], reverse=True)
+        for zi, zone in enumerate(zones):
+            radius_obs = float(zone["r"]) * scale
+            color = zone_colors[zi % len(zone_colors)]
+            circle_fill = Circle((ex, ey), radius_obs, facecolor=color, edgecolor="none", alpha=0.08)
+            circle_edge = Circle((ex, ey), radius_obs, fill=False, edgecolor=color, linewidth=1.2, alpha=0.8)
+            ax.add_patch(circle_fill)
+            ax.add_patch(circle_edge)
 
     sx, sy = env._world_to_obs(tuple(env.start_pos))
     gx, gy = env._world_to_obs(tuple(env.goal_pos))
@@ -132,14 +146,25 @@ def visualize_episode(
 
 def main() -> None:
     args = parse_args()
+    cfg = TrainConfig()
 
     scenario = load_scenario(args.scenario)
+    reward_weights = RewardWeights(
+        goal_reward=cfg.goal_reward,
+        step_penalty=cfg.step_penalty,
+        risk_lambda=cfg.risk_lambda,
+        guide_omega=cfg.guide_omega,
+        timeout_penalty=cfg.timeout_penalty,
+        blocked_move_penalty=cfg.blocked_move_penalty,
+    )
     env = RiskAwareGridEnv(
         scenario=scenario,
         observation_size=args.observation_size,
         max_steps=args.max_steps,
         enemy_jitter=args.enemy_jitter,
         start_jitter=args.start_jitter,
+        reward_weights=reward_weights,
+        blocked_risk_threshold=cfg.high_risk_block_threshold,
         seed=args.seed,
     )
 

@@ -14,8 +14,8 @@
     {
       "id": 1,
       "pos": [
-        16,
-        21
+        20,
+        27
       ],
       "detection_shape": "circle",
       "comment": "",
@@ -37,8 +37,8 @@
     {
       "id": 2,
       "pos": [
-        25,
-        42
+        23,
+        49
       ],
       "detection_shape": "circle",
       "comment": "",

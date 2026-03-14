@@ -27,8 +27,21 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--episodes", type=int, default=1200)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--checkpoint-dir", type=str, default="checkpoints")
+    parser.add_argument("--resume", type=str, default=None)
+    parser.add_argument("--learning-rate", type=float, default=None)
+    parser.add_argument("--initial-global-step", type=int, default=None)
     parser.add_argument("--device", type=str, default=None)
     return parser.parse_args()
+
+
+def _resolve_model_path(path_text: str) -> Path:
+    p = Path(path_text)
+    if p.exists():
+        return p
+    fallback = Path("checkpoints") / p.name
+    if fallback.exists():
+        return fallback
+    raise FileNotFoundError(f"Model file not found: {p}")
 
 
 def evaluate_greedy(agent: D3QNAgent, env: RiskAwareGridEnv, episodes: int, seed: int) -> tuple[float, float]:
@@ -54,6 +67,9 @@ def main() -> None:
     args = parse_args()
 
     cfg = TrainConfig(episodes=args.episodes, seed=args.seed)
+    if args.learning_rate is not None:
+        cfg.learning_rate = args.learning_rate
+
     scenario = load_scenario(args.scenario)
 
     random.seed(cfg.seed)
@@ -66,6 +82,7 @@ def main() -> None:
         risk_lambda=cfg.risk_lambda,
         guide_omega=cfg.guide_omega,
         timeout_penalty=cfg.timeout_penalty,
+        blocked_move_penalty=cfg.blocked_move_penalty,
     )
     env = RiskAwareGridEnv(
         scenario=scenario,
@@ -74,6 +91,7 @@ def main() -> None:
         enemy_jitter=cfg.enemy_jitter,
         start_jitter=cfg.start_jitter,
         reward_weights=reward_weights,
+        blocked_risk_threshold=cfg.high_risk_block_threshold,
         seed=cfg.seed,
     )
 
@@ -84,6 +102,7 @@ def main() -> None:
         enemy_jitter=cfg.eval_enemy_jitter,
         start_jitter=cfg.eval_start_jitter,
         reward_weights=reward_weights,
+        blocked_risk_threshold=cfg.high_risk_block_threshold,
         seed=cfg.seed + 10_000,
     )
 
@@ -104,95 +123,114 @@ def main() -> None:
     checkpoint_dir = Path(args.checkpoint_dir)
     checkpoint_dir.mkdir(parents=True, exist_ok=True)
 
+    if args.resume:
+        resume_path = _resolve_model_path(args.resume)
+        agent.load(resume_path)
+        print(f"Resumed model from: {resume_path.resolve()}")
+
     global_step = 0
+    if args.initial_global_step is not None:
+        global_step = max(0, int(args.initial_global_step))
+        print(f"Initial global_step set to: {global_step}")
+    elif args.resume:
+        # Resume model weights while keeping exploration near late-training regime by default.
+        global_step = cfg.epsilon_decay_steps
+        print(f"Resume mode: using global_step={global_step} to avoid epsilon schedule restart")
     best_eval_success = float("-inf")
     best_eval_reward = float("-inf")
 
-    for ep in trange(cfg.episodes, desc="Training", ncols=100):
-        state, _ = env.reset()
-        ep_reward = 0.0
-        ep_risk = 0.0
-        losses: list[float] = []
-        reached_goal = False
+    interrupted = False
+    try:
+        for ep in trange(cfg.episodes, desc="Training", ncols=100):
+            state, _ = env.reset()
+            ep_reward = 0.0
+            ep_risk = 0.0
+            losses: list[float] = []
+            reached_goal = False
 
-        for _ in range(cfg.max_steps_per_episode):
-            epsilon = linear_schedule(
-                cfg.epsilon_start,
-                cfg.epsilon_end,
-                global_step,
-                cfg.epsilon_decay_steps,
-            )
-            heuristic_prob = linear_schedule(
-                cfg.heuristic_start,
-                cfg.heuristic_end,
-                global_step,
-                cfg.heuristic_decay_steps,
-            )
-            beta = linear_schedule(
-                cfg.per_beta_start,
-                cfg.per_beta_end,
-                global_step,
-                cfg.per_beta_steps,
-            )
+            for _ in range(cfg.max_steps_per_episode):
+                epsilon = linear_schedule(
+                    cfg.epsilon_start,
+                    cfg.epsilon_end,
+                    global_step,
+                    cfg.epsilon_decay_steps,
+                )
+                heuristic_prob = linear_schedule(
+                    cfg.heuristic_start,
+                    cfg.heuristic_end,
+                    global_step,
+                    cfg.heuristic_decay_steps,
+                )
+                beta = linear_schedule(
+                    cfg.per_beta_start,
+                    cfg.per_beta_end,
+                    global_step,
+                    cfg.per_beta_steps,
+                )
 
-            action = agent.select_action(
-                state,
-                epsilon=epsilon,
-                heuristic_prob=heuristic_prob,
-                heuristic_fn=env.heuristic_action,
-            )
+                action = agent.select_action(
+                    state,
+                    epsilon=epsilon,
+                    heuristic_prob=heuristic_prob,
+                    heuristic_fn=env.heuristic_action,
+                )
 
-            next_state, reward, terminated, truncated, info = env.step(action)
-            done = terminated or truncated
+                next_state, reward, terminated, truncated, info = env.step(action)
+                done = terminated or truncated
 
-            agent.remember(state, action, reward, next_state, done)
+                agent.remember(state, action, reward, next_state, done)
 
-            if len(replay) >= cfg.min_replay_size:
-                metrics = agent.learn(beta=beta)
-                losses.append(metrics["loss"])
+                if len(replay) >= cfg.min_replay_size:
+                    metrics = agent.learn(beta=beta)
+                    losses.append(metrics["loss"])
 
-            state = next_state
-            ep_reward += reward
-            ep_risk += info["risk"]
-            global_step += 1
+                state = next_state
+                ep_reward += reward
+                ep_risk += info["risk"]
+                global_step += 1
 
-            if terminated:
-                reached_goal = True
-            if done:
-                break
+                if terminated:
+                    reached_goal = True
+                if done:
+                    break
 
-        if (ep + 1) % cfg.eval_interval_episodes == 0:
-            eval_success, eval_reward = evaluate_greedy(
-                agent=agent,
-                env=eval_env,
-                episodes=cfg.eval_episodes,
-                seed=cfg.seed + (ep + 1) * 100,
-            )
+            if (ep + 1) % cfg.eval_interval_episodes == 0:
+                eval_success, eval_reward = evaluate_greedy(
+                    agent=agent,
+                    env=eval_env,
+                    episodes=cfg.eval_episodes,
+                    seed=cfg.seed + (ep + 1) * 100,
+                )
 
-            should_save = False
-            if eval_success > best_eval_success:
-                should_save = True
-            elif eval_success == best_eval_success and eval_reward > best_eval_reward:
-                should_save = True
+                should_save = False
+                if eval_success > best_eval_success:
+                    should_save = True
+                elif eval_success == best_eval_success and eval_reward > best_eval_reward:
+                    should_save = True
 
-            if should_save:
-                best_eval_success = eval_success
-                best_eval_reward = eval_reward
-                agent.save(checkpoint_dir / "best_model.pt")
+                if should_save:
+                    best_eval_success = eval_success
+                    best_eval_reward = eval_reward
+                    agent.save(checkpoint_dir / "best_model.pt")
 
-            print(
-                f"[Eval] ep={ep + 1:4d} | success={eval_success:.2%} | "
-                f"avg_reward={eval_reward:8.2f} | best_success={best_eval_success:.2%}"
-            )
+                print(
+                    f"[Eval] ep={ep + 1:4d} | success={eval_success:.2%} | "
+                    f"avg_reward={eval_reward:8.2f} | best_success={best_eval_success:.2%}"
+                )
 
-        if (ep + 1) % 20 == 0:
-            avg_loss = float(np.mean(losses)) if losses else 0.0
-            avg_risk = ep_risk / max(env.step_count, 1)
-            print(
-                f"Episode {ep + 1:4d} | reward={ep_reward:8.2f} | "
-                f"avg_risk={avg_risk:6.3f} | loss={avg_loss:7.4f} | "
-                f"goal={int(reached_goal)} | epsilon={epsilon:.3f}"
-            )
+            if (ep + 1) % 20 == 0:
+                avg_loss = float(np.mean(losses)) if losses else 0.0
+                avg_risk = ep_risk / max(env.step_count, 1)
+                print(
+                    f"Episode {ep + 1:4d} | reward={ep_reward:8.2f} | "
+                    f"avg_risk={avg_risk:6.3f} | loss={avg_loss:7.4f} | "
+                    f"goal={int(reached_goal)} | epsilon={epsilon:.3f}"
+                )
+    except KeyboardInterrupt:
+        interrupted = True
+        print("Training interrupted by user.")
+        agent.save(checkpoint_dir / "interrupted_model.pt")
+        print(f"Saved interrupted model to: {(checkpoint_dir / 'interrupted_model.pt').resolve()}")
 
     if best_eval_success < 0.0:
         agent.save(checkpoint_dir / "best_model.pt")
@@ -200,7 +238,10 @@ def main() -> None:
         best_eval_reward = 0.0
 
     agent.save(checkpoint_dir / "final_model.pt")
-    print("Training finished.")
+    if interrupted:
+        print("Training stopped early.")
+    else:
+        print("Training finished.")
     print(f"Best eval success: {best_eval_success:.2%}")
     print(f"Best eval reward: {best_eval_reward:.2f}")
     print(f"Saved checkpoints to: {checkpoint_dir.resolve()}")
