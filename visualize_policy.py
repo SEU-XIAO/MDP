@@ -164,7 +164,7 @@ def main() -> None:
         enemy_jitter=args.enemy_jitter,
         start_jitter=args.start_jitter,
         reward_weights=reward_weights,
-        blocked_risk_threshold=cfg.high_risk_block_threshold,
+        blocked_risk_threshold=getattr(cfg, 'high_risk_block_threshold', 0.8),
         seed=args.seed,
     )
 
