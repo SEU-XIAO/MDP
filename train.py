@@ -13,6 +13,17 @@ from src.config import TrainConfig, load_scenario
 from src.environment.risk_grid_env import RewardWeights, RiskAwareGridEnv
 from src.replay.per_buffer import PrioritizedReplayBuffer
 
+from torch.utils.tensorboard import SummaryWriter
+import os
+
+# 建议 log_dir 包含版本号方便在 TensorBoard 侧边栏对比
+log_path = os.path.join("runs", "v6_dijkstra_256batch")
+writer = SummaryWriter(log_dir=log_path)
+
+# 在 Episode 循环结束处添加记录
+# writer.add_scalar("Loss/train", loss_value, episode)
+# writer.add_scalar("Reward/episode", total_reward, episode)
+# writer.add_scalar("Success/rate", success_rate, episode)
 
 def linear_schedule(start: float, end: float, step: int, total_steps: int) -> float:
     if total_steps <= 0:
