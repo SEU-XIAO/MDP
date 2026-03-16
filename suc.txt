@@ -1,0 +1,194 @@
+root@autodl-container-317042b6f6-8ebb488d:~/autodl-tmp/MDP# python train.py \
+  --episodes 2000 \
+  --checkpoint-dir checkpoints/retrain_v5_4090 \
+  --device cuda \
+  --lr 8e-5 \
+  --batch-size 256 \
+  --max-steps 450 \
+  --epsilon-decay-steps 200000 \
+  --enemy-jitter 1 \
+  --start-jitter 1 \
+  --eval-enemy-jitter 1 \
+  --eval-start-jitter 1
+============================================================
+🚀  Training started on GPU: NVIDIA GeForce RTX 4090 D
+📍  Device object: cuda
+============================================================
+Training:   1%|▍                                                  | 19/2000 [00:01<01:39, 19.96it/s]Episode   20 | reward=  603.08 | avg_risk= 0.192 | loss= 0.0000 | goal=1 | epsilon=0.987
+Training:   2%|▉                                                  | 38/2000 [00:12<41:08,  1.26s/it]Episode   40 | reward=  518.46 | avg_risk= 0.278 | loss= 1.5501 | goal=1 | epsilon=0.974
+Training:   2%|█▏                                               | 49/2000 [01:17<3:16:12,  6.03s/it]
+[Eval] ep=  50 | success=35.00% | avg_reward= -111.41 | best_success=35.00%
+Training:   3%|█▍                                               | 59/2000 [02:30<3:36:12,  6.68s/it]Episode   60 | reward=  520.15 | avg_risk= 0.256 | loss= 2.4076 | goal=1 | epsilon=0.960
+Training:   4%|█▉                                               | 79/2000 [04:25<3:23:01,  6.34s/it]Episode   80 | reward=  591.16 | avg_risk= 0.158 | loss= 2.7932 | goal=1 | epsilon=0.949
+Training:   5%|██▍                                              | 99/2000 [06:20<2:47:09,  5.28s/it]
+[Eval] ep= 100 | success=25.00% | avg_reward=   34.33 | best_success=35.00%
+Episode  100 | reward=  587.03 | avg_risk= 0.194 | loss= 2.2143 | goal=1 | epsilon=0.937
+Training:   6%|██▊                                             | 119/2000 [08:14<2:31:48,  4.84s/it]Episode  120 | reward=  539.17 | avg_risk= 0.273 | loss= 1.5996 | goal=1 | epsilon=0.925
+Training:   7%|███▎                                            | 139/2000 [10:02<2:36:40,  5.05s/it]Episode  140 | reward=  617.46 | avg_risk= 0.128 | loss= 0.9726 | goal=1 | epsilon=0.914
+Training:   7%|███▌                                            | 149/2000 [10:55<3:01:23,  5.88s/it]
+[Eval] ep= 150 | success=15.00% | avg_reward=  -46.86 | best_success=35.00%
+Training:   8%|███▊                                            | 159/2000 [11:59<2:48:17,  5.48s/it]Episode  160 | reward=  635.37 | avg_risk= 0.132 | loss= 1.0101 | goal=1 | epsilon=0.902
+Training:   9%|████▎                                           | 179/2000 [13:42<2:37:29,  5.19s/it]Episode  180 | reward=  631.21 | avg_risk= 0.100 | loss= 0.8060 | goal=1 | epsilon=0.891
+Training:  10%|████▊                                           | 199/2000 [15:31<2:49:51,  5.66s/it]
+[Eval] ep= 200 | success=45.00% | avg_reward=  197.54 | best_success=45.00%
+Episode  200 | reward=  625.34 | avg_risk= 0.125 | loss= 0.7355 | goal=1 | epsilon=0.879
+Training:  11%|█████▎                                          | 219/2000 [17:34<3:08:26,  6.35s/it]Episode  220 | reward=  612.15 | avg_risk= 0.124 | loss= 0.6722 | goal=1 | epsilon=0.867
+Training:  12%|█████▋                                          | 239/2000 [19:42<3:10:39,  6.50s/it]Episode  240 | reward=  635.09 | avg_risk= 0.114 | loss= 0.8687 | goal=1 | epsilon=0.855
+Training:  12%|█████▉                                          | 249/2000 [20:43<3:04:02,  6.31s/it]
+[Eval] ep= 250 | success=95.00% | avg_reward=  543.06 | best_success=95.00%
+Training:  13%|██████▏                                         | 259/2000 [21:44<2:45:18,  5.70s/it]Episode  260 | reward=  607.72 | avg_risk= 0.091 | loss= 0.4536 | goal=1 | epsilon=0.842
+Training:  14%|██████▋                                         | 279/2000 [23:51<3:18:03,  6.90s/it]Episode  280 | reward=  610.25 | avg_risk= 0.180 | loss= 0.4000 | goal=1 | epsilon=0.830
+Training:  15%|███████▏                                        | 299/2000 [25:52<2:35:23,  5.48s/it]
+[Eval] ep= 300 | success=95.00% | avg_reward=  548.07 | best_success=95.00%
+Episode  300 | reward=  597.27 | avg_risk= 0.203 | loss= 0.4391 | goal=1 | epsilon=0.817
+Training:  16%|███████▋                                        | 319/2000 [27:52<2:25:26,  5.19s/it]Episode  320 | reward=  632.18 | avg_risk= 0.080 | loss= 0.3936 | goal=1 | epsilon=0.806
+Training:  17%|████████▏                                       | 339/2000 [29:53<2:25:07,  5.24s/it]Episode  340 | reward=  630.60 | avg_risk= 0.143 | loss= 0.4070 | goal=1 | epsilon=0.793
+Training:  17%|████████▍                                       | 349/2000 [30:54<2:42:27,  5.90s/it]
+[Eval] ep= 350 | success=100.00% | avg_reward=  647.36 | best_success=100.00%
+Training:  18%|████████▌                                       | 359/2000 [32:11<2:27:10,  5.38s/it]^C
+
+Training interrupted by user. Saving model...
+Training Complete. Best eval success: 100.00%
+root@autodl-container-317042b6f6-8ebb488d:~/autodl-tmp/MDP# python test_v5.py --num-tests 100 --enemy-jitter 1
+✅ Loaded model from: checkpoints/retrain_v5_4090/best_model.pt
+🚀 Starting Stress Test: 100 episodes, Enemy Jitter = 1
+
+========================================
+📊 TEST RESULTS FOR V5 MODEL
+========================================
+🏆 Success Rate: 98/100 (98.00%)
+💰 Avg Reward:  519.54
+⏱️  Avg Steps:   77.4 steps
+⚠️  Avg Risk/Step: 0.1126
+💥 Total Collisions: 2 (across all episodes)
+========================================
+root@autodl-container-317042b6f6-8ebb488d:~/autodl-tmp/MDP# python test_v5.py --num-tests 100 --enemy-jitter 2
+✅ Loaded model from: checkpoints/retrain_v5_4090/best_model.pt
+🚀 Starting Stress Test: 100 episodes, Enemy Jitter = 2
+
+========================================
+📊 TEST RESULTS FOR V5 MODEL
+========================================
+🏆 Success Rate: 100/100 (100.00%)
+💰 Avg Reward:  534.51
+⏱️  Avg Steps:   66.6 steps
+⚠️  Avg Risk/Step: 0.1166
+💥 Total Collisions: 0 (across all episodes)
+========================================
+root@autodl-container-317042b6f6-8ebb488d:~/autodl-tmp/MDP# python test_v5.py --num-tests 100 --enemy-jitter 3
+✅ Loaded model from: checkpoints/retrain_v5_4090/best_model.pt
+🚀 Starting Stress Test: 100 episodes, Enemy Jitter = 3
+
+========================================
+📊 TEST RESULTS FOR V5 MODEL
+========================================
+🏆 Success Rate: 100/100 (100.00%)
+💰 Avg Reward:  533.32
+⏱️  Avg Steps:   67.2 steps
+⚠️  Avg Risk/Step: 0.1229
+💥 Total Collisions: 0 (across all episodes)
+========================================
+root@autodl-container-317042b6f6-8ebb488d:~/autodl-tmp/MDP# python visualize.py \
+  --model checkpoints/retrain_v5_4090/best_model.pt \
+  --scenario configs/scenario.json \
+  --enemy-jitter 1 \
+  --pause 0.05 \
+  --episodes 3
+python: can't open file '/root/autodl-tmp/MDP/visualize.py': [Errno 2] No such file or directory
+root@autodl-container-317042b6f6-8ebb488d:~/autodl-tmp/MDP# python visualize_policy.py \
+  --model checkpoints/retrain_v5_4090/best_model.pt \
+  --scenario configs/scenario.json \
+  --enemy-jitter 1 \
+  --pause 0.05 \
+  --episodes 3
+Traceback (most recent call last):
+  File "/root/autodl-tmp/MDP/visualize_policy.py", line 215, in <module>
+    main()
+  File "/root/autodl-tmp/MDP/visualize_policy.py", line 167, in main
+    blocked_risk_threshold=cfg.high_risk_block_threshold,
+                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: 'TrainConfig' object has no attribute 'high_risk_block_threshold'
+root@autodl-container-317042b6f6-8ebb488d:~/autodl-tmp/MDP# git add .
+root@autodl-container-317042b6f6-8ebb488d:~/autodl-tmp/MDP# git admit -m "第一次百分百"
+git: 'admit' is not a git command. See 'git --help'.
+
+The most similar commands are
+        commit
+        daemon
+root@autodl-container-317042b6f6-8ebb488d:~/autodl-tmp/MDP# git commit -m "第一次百分百"
+Author identity unknown
+
+*** Please tell me who you are.
+
+Run
+
+  git config --global user.email "you@example.com"
+  git config --global user.name "Your Name"
+
+to set your account's default identity.
+Omit --global to set the identity only in this repository.
+
+fatal: unable to auto-detect email address (got 'root@autodl-container-317042b6f6-8ebb488d.(none)')
+root@autodl-container-317042b6f6-8ebb488d:~/autodl-tmp/MDP# ^C
+root@autodl-container-317042b6f6-8ebb488d:~/autodl-tmp/MDP# ^C
+root@autodl-container-317042b6f6-8ebb488d:~/autodl-tmp/MDP#   git config --global user.email "1449627575@qq.com"
+root@autodl-container-317042b6f6-8ebb488d:~/autodl-tmp/MDP# git config --global user.name "SEU-XIAO"
+root@autodl-container-317042b6f6-8ebb488d:~/autodl-tmp/MDP# git commit -m "第一次百分百"
+[main cae93b4] 第一次百分百
+ 26 files changed, 2036 insertions(+), 1858 deletions(-)
+ create mode 100644 .gitignore
+ rewrite src/__pycache__/config.cpython-312.pyc (89%)
+ rewrite src/config.py (63%)
+ rewrite src/models/__pycache__/d3qn.cpython-312.pyc (92%)
+ create mode 100644 test_v5.py
+root@autodl-container-317042b6f6-8ebb488d:~/autodl-tmp/MDP# git push origin main
+To https://github.com/SEU-XIAO/MDP.git
+ ! [rejected]        main -> main (fetch first)
+error: failed to push some refs to 'https://github.com/SEU-XIAO/MDP.git'
+hint: Updates were rejected because the remote contains work that you do
+hint: not have locally. This is usually caused by another repository pushing
+hint: to the same ref. You may want to first integrate the remote changes
+hint: (e.g., 'git pull ...') before pushing again.
+hint: See the 'Note about fast-forwards' in 'git push --help' for details.
+root@autodl-container-317042b6f6-8ebb488d:~/autodl-tmp/MDP# git push origin main --force
+Enumerating objects: 101, done.
+Counting objects: 100% (101/101), done.
+Delta compression using up to 192 threads
+Compressing objects: 100% (100/100), done.
+Writing objects: 100% (101/101), 13.13 MiB | 4.18 MiB/s, done.
+Total 101 (delta 40), reused 0 (delta 0), pack-reused 0
+remote: Resolving deltas: 100% (40/40), done.
+To https://github.com/SEU-XIAO/MDP.git
+ + 495c3cd...cae93b4 main -> main (forced update)
+root@autodl-container-317042b6f6-8ebb488d:~/autodl-tmp/MDP# git add .
+root@autodl-container-317042b6f6-8ebb488d:~/autodl-tmp/MDP# git commit -m "加上模型"
+On branch main
+Your branch is up to date with 'origin/main'.
+
+nothing to commit, working tree clean
+root@autodl-container-317042b6f6-8ebb488d:~/autodl-tmp/MDP# git add .
+root@autodl-container-317042b6f6-8ebb488d:~/autodl-tmp/MDP# git commit -m "加上模型"
+[main a9e9396] 加上模型
+ 10 files changed, 1 deletion(-)
+ create mode 100644 checkpoints/retrain_v3_4090/best_model.pt
+ create mode 100644 checkpoints/retrain_v3_4090/final_model.pt
+ create mode 100644 checkpoints/retrain_v3_4090/interrupted_model.pt
+ create mode 100644 checkpoints/retrain_v4_final/best_model.pt
+ create mode 100644 checkpoints/retrain_v4_final/final_model.pt
+ create mode 100644 checkpoints/retrain_v4_final/interrupted_model.pt
+ create mode 100644 checkpoints/retrain_v5_4090/best_model.pt
+ create mode 100644 checkpoints/retrain_v5_4090/final_model.pt
+ create mode 100644 checkpoints/retrain_v5_4090/interrupted_model.pt
+root@autodl-container-317042b6f6-8ebb488d:~/autodl-tmp/MDP# git push origin main --force
+Enumerating objects: 19, done.
+Counting objects: 100% (19/19), done.
+Delta compression using up to 192 threads
+Compressing objects: 100% (15/15), done.
+error: RPC failed; HTTP 408 curl 22 The requested URL returned error: 408
+send-pack: unexpected disconnect while reading sideband packet
+Writing objects: 100% (16/16), 533.29 MiB | 8.27 MiB/s, done.
+Total 16 (delta 5), reused 0 (delta 0), pack-reused 0
+fatal: the remote end hung up unexpectedly
+Everything up-to-date
+root@autodl-container-317042b6f6-8ebb488d:~/autodl-tmp/MDP# git reset --soft HEAD~1
+root@autodl-container-317042b6f6-8ebb488d:~/autodl-tmp/MDP#

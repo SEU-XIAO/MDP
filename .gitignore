@@ -3,5 +3,9 @@ __pycache__/
 checkpoints/
 runs/
 __pycache__/
+retrain_v6_dijkstra/
 *.pyc
 .DS_Store
+*.pt
+*.pth
+*.checkpoint

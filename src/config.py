@@ -53,6 +53,8 @@ class TrainConfig:
     eval_enemy_jitter: int = 1  
     eval_start_jitter: int = 1
 
+    high_risk_block_threshold: float = 0.95
+
 
 def load_scenario(path: str | Path) -> dict[str, Any]:
     with Path(path).open("r", encoding="utf-8") as f:

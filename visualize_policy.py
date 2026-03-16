@@ -122,8 +122,8 @@ def visualize_episode(
             f"step={t + 1}\n"
             f"reward={cumulative_reward:.2f}\n"
             f"avg_risk={avg_risk:.3f}\n"
-            f"cell_risk={info['risk']:.3f}\n"
-            f"distance={info['distance']:.2f}"
+            f"cell_risk={info.get('risk', 0.0):.3f}\n"
+            f"dijkstra_cost={info.get('dijkstra_cost', 0.0):.2f}"
         )
 
         plt.pause(pause_seconds)

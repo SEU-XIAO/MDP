@@ -2,290 +2,220 @@ from __future__ import annotations
 
 import argparse
 import random
-from pathlib import Path
-
+import os
 import numpy as np
 import torch
+from pathlib import Path
 from tqdm import trange
+from torch.utils.tensorboard import SummaryWriter
 
 from src.agent.d3qn_agent import AgentConfig, D3QNAgent
 from src.config import TrainConfig, load_scenario
 from src.environment.risk_grid_env import RewardWeights, RiskAwareGridEnv
 from src.replay.per_buffer import PrioritizedReplayBuffer
 
-from torch.utils.tensorboard import SummaryWriter
-import os
+# --- 1. 动态课程学习生成器 ---
+class RandomScenarioGenerator:
+    def __init__(self, grid_size=64, start_pos=(1, 1), goal_pos=(62, 62)):
+        self.grid_size = grid_size
+        self.start_pos = start_pos
+        self.goal_pos = goal_pos
 
-# 建议 log_dir 包含版本号方便在 TensorBoard 侧边栏对比
-log_path = os.path.join("runs", "v6_dijkstra_256batch")
-writer = SummaryWriter(log_dir=log_path)
+    def generate(self, episode_idx: int):
+        """
+        根据训练进度动态调整难度：课程学习 (Curriculum Learning)
+        """
+        # 风险区数量随轮次增加：0轮时3-5个，2000轮时6-10个
+        max_enemies = min(10, 5 + (episode_idx // 400))
+        num_enemies = random.randint(3, max_enemies)
+        
+        enemies = []
+        for _ in range(num_enemies):
+            ex = random.randint(10, self.grid_size - 11)
+            ey = random.randint(10, self.grid_size - 11)
+            # 难度越高，风险半径越随机
+            enemies.append({
+                "pos": [ex, ey], 
+                "detection_zones": [{"r": random.uniform(3.0, 7.5), "p": random.uniform(0.7, 1.0)}]
+            })
 
-# 在 Episode 循环结束处添加记录
-# writer.add_scalar("Loss/train", loss_value, episode)
-# writer.add_scalar("Reward/episode", total_reward, episode)
-# writer.add_scalar("Success/rate", success_rate, episode)
+        # U型胡同出现概率随进度提升：最高 35%
+        u_prob = min(0.35, 0.1 + (episode_idx / 4000))
+        if random.random() < u_prob:
+            enemies.extend(self._create_u_shape(episode_idx))
 
+        return {
+            "map": {"grid_size": self.grid_size, "start_pos": self.start_pos, "goal_pos": self.goal_pos},
+            "enemies": enemies,
+        }
+
+    def _create_u_shape(self, episode_idx):
+        u_points = []
+        # 随机位置，但确保开口可能阻挡路径
+        bx = random.randint(15, 35)
+        by = random.randint(15, 35)
+        # 随着轮次增加，U型墙可能变得更长更深
+        length = min(15, 10 + (episode_idx // 500))
+        
+        for i in range(length): # 底部
+            u_points.append({"pos": [bx + i, by + 10], "detection_zones": [{"r": 2.2, "p": 1.0}]})
+        for i in range(length - 2): # 两翼
+            u_points.append({"pos": [bx, by + i], "detection_zones": [{"r": 2.2, "p": 1.0}]})
+            u_points.append({"pos": [bx + length - 1, by + i], "detection_zones": [{"r": 2.2, "p": 1.0}]})
+        return u_points
+
+# --- 2. 辅助函数 ---
 def linear_schedule(start: float, end: float, step: int, total_steps: int) -> float:
-    if total_steps <= 0:
-        return end
-    ratio = min(step / total_steps, 1.0)
-    return start + (end - start) * ratio
-
+    if total_steps <= 0: return end
+    return start + (end - start) * min(step / total_steps, 1.0)
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Train D3QN on risk-aware grid world (Optimized for 4090)")
-    # 基础路径与设备
+    parser = argparse.ArgumentParser(description="V7: Curriculum Learning on 4090")
     parser.add_argument("--scenario", type=str, default="configs/scenario.json")
-    parser.add_argument("--checkpoint-dir", type=str, default="checkpoints")
-    parser.add_argument("--device", type=str, default=None, help="cuda or cpu")
-    parser.add_argument("--resume", type=str, default=None)
-    
-    # 训练循环控制
-    parser.add_argument("--episodes", type=int, default=2000)
-    parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--initial-global-step", type=int, default=None)
-
-    # 4090 核心参数优化
-    parser.add_argument("--batch-size", type=int, default=256, help="Batch size for training")
-    parser.add_argument("--learning-rate", "--lr", type=float, default=8e-5, help="Learning rate")
-    parser.add_argument("--max-steps", type=int, default=450, help="Max steps per episode")
-    parser.add_argument("--epsilon-decay-steps", type=int, default=200000, help="Steps for epsilon decay")
-    
-    # 环境抖动控制
-    parser.add_argument("--enemy-jitter", type=int, default=None)
-    parser.add_argument("--start-jitter", type=int, default=None)
-    parser.add_argument("--eval-enemy-jitter", type=int, default=None)
-    parser.add_argument("--eval-start-jitter", type=int, default=None)
-    
+    parser.add_argument("--checkpoint-dir", type=str, default="checkpoints/v7_curriculum")
+    parser.add_argument("--device", type=str, default=None)
+    parser.add_argument("--episodes", type=int, default=3000) # 建议增加到 3000
+    parser.add_argument("--batch-size", type=int, default=256)
+    parser.add_argument("--lr", type=float, default=6e-5)
     return parser.parse_args()
 
-
-def _resolve_model_path(path_text: str) -> Path:
-    p = Path(path_text)
-    if p.exists():
-        return p
-    fallback = Path("checkpoints") / p.name
-    if fallback.exists():
-        return fallback
-    raise FileNotFoundError(f"Model file not found: {p}")
-
-
-def evaluate_greedy(agent: D3QNAgent, env: RiskAwareGridEnv, episodes: int, seed: int) -> tuple[float, float]:
+def evaluate_greedy(agent, env, episodes, seed):
     success = 0
-    rewards: list[float] = []
+    rewards = []
     for i in range(episodes):
         state, _ = env.reset(seed=seed + i)
         ep_reward = 0.0
         for _ in range(env.max_steps):
             action = agent.select_action(state, epsilon=0.0)
-            next_state, reward, terminated, truncated, _ = env.step(action)
+            next_state, reward, term, trunc, _ = env.step(action)
             ep_reward += reward
             state = next_state
-            if terminated:
-                success += 1
-            if terminated or truncated:
-                break
+            if term: success += 1
+            if term or trunc: break
         rewards.append(ep_reward)
-    return success / max(episodes, 1), float(np.mean(rewards))
+    return success / episodes, np.mean(rewards)
 
-
-def main() -> None:
+# --- 3. 主训练流程 ---
+def main():
     args = parse_args()
-
-    # --- 设备检测 ---
-    if args.device:
-        device_type = args.device
-    else:
-        device_type = "cuda" if torch.cuda.is_available() else "cpu"
+    device = torch.device(args.device if args.device else ("cuda" if torch.cuda.is_available() else "cpu"))
     
-    device = torch.device(device_type)
-    print("="*60)
-    if device.type == "cuda":
-        gpu_name = torch.cuda.get_device_name(0)
-        print(f"🚀  Training started on GPU: {gpu_name}")
-    else:
-        print("💻  Training started on CPU")
-    print(f"📍  Device object: {device}")
-    print("="*60)
-
-    # --- 配置加载 ---
-    cfg = TrainConfig(episodes=args.episodes, seed=args.seed)
+    # 初始化日志
+    writer = SummaryWriter(log_dir=f"runs/v7_curriculum_4090")
     
-    # 覆盖命令行输入的参数
-    cfg.learning_rate = args.learning_rate
+    # 加载基础配置并根据建议调优
+    cfg = TrainConfig(episodes=args.episodes)
     cfg.batch_size = args.batch_size
-    cfg.max_steps_per_episode = args.max_steps
-    cfg.epsilon_decay_steps = args.epsilon_decay_steps
+    cfg.learning_rate = args.lr
+    cfg.epsilon_decay_steps = 500000  # 延长探索期
+    cfg.min_replay_size = 20000       # 预热更久，见多识广
+    cfg.goal_reward = 500.0           # 强化终点诱惑
+    cfg.step_penalty = -0.4           # 给绕路留出容错
+
+    # 初始化生成器
+    generator = RandomScenarioGenerator(grid_size=cfg.observation_size)
+    env = None 
     
-    if args.enemy_jitter is not None:
-        cfg.enemy_jitter = args.enemy_jitter
-    if args.start_jitter is not None:
-        cfg.start_jitter = args.start_jitter
-    if args.eval_enemy_jitter is not None:
-        cfg.eval_enemy_jitter = args.eval_enemy_jitter
-    if args.eval_start_jitter is not None:
-        cfg.eval_start_jitter = args.eval_start_jitter
-
-    scenario = load_scenario(args.scenario)
-
-    random.seed(cfg.seed)
-    np.random.seed(cfg.seed)
-    torch.manual_seed(cfg.seed)
-
-    # 奖励权重逻辑
-    reward_weights = RewardWeights(
-        goal_reward=cfg.goal_reward,
-        step_penalty=cfg.step_penalty,
-        risk_lambda=cfg.risk_lambda,
-        guide_omega=cfg.guide_omega,
-        timeout_penalty=cfg.timeout_penalty,
-        blocked_move_penalty=cfg.blocked_move_penalty,
-    )
-    
-    # --- 实例化训练环境 ---
-    # 修复：直接使用 0.95 作为默认风险阈值，避免引用 cfg 中不存在的属性
-    env = RiskAwareGridEnv(
-        scenario=scenario,
-        observation_size=cfg.observation_size,
-        max_steps=cfg.max_steps_per_episode,
-        enemy_jitter=cfg.enemy_jitter,
-        start_jitter=cfg.start_jitter,
-        reward_weights=reward_weights,
-        blocked_risk_threshold=0.95,
-        seed=cfg.seed,
-    )
-
-    # --- 实例化评估环境 ---
+    # 评估环境（静态 Benchmark）
+    eval_scenario = load_scenario(args.scenario)
     eval_env = RiskAwareGridEnv(
-        scenario=scenario,
+        scenario=eval_scenario,
         observation_size=cfg.observation_size,
         max_steps=cfg.max_steps_per_episode,
-        enemy_jitter=cfg.eval_enemy_jitter,
-        start_jitter=cfg.eval_start_jitter,
-        reward_weights=reward_weights,
-        blocked_risk_threshold=0.95,
-        seed=cfg.seed + 10000,
+        reward_weights=RewardWeights(goal_reward=500, step_penalty=-0.4, risk_lambda=2.5, guide_omega=1.5),
+        seed=999
     )
 
-    # --- 实例化 Agent ---
-    replay = PrioritizedReplayBuffer(capacity=cfg.replay_capacity, alpha=0.6) # 默认 alpha
+    replay = PrioritizedReplayBuffer(capacity=cfg.replay_capacity)
     agent = D3QNAgent(
-        state_shape=env.observation_space.shape,
-        num_actions=env.action_space.n,
+        state_shape=(3, 64, 64), # 确保与环境一致
+        num_actions=5,
         replay_buffer=replay,
-        config=AgentConfig(
-            gamma=cfg.gamma,
-            learning_rate=cfg.learning_rate,
-            target_update_interval=cfg.target_update_interval,
-            batch_size=cfg.batch_size,
-        ),
-        device=device_type,
+        config=AgentConfig(gamma=cfg.gamma, learning_rate=cfg.learning_rate, batch_size=cfg.batch_size),
+        device=str(device)
     )
 
     checkpoint_dir = Path(args.checkpoint_dir)
     checkpoint_dir.mkdir(parents=True, exist_ok=True)
 
-    if args.resume:
-        resume_path = _resolve_model_path(args.resume)
-        agent.load(resume_path)
-        print(f"Resumed model from: {resume_path.resolve()}")
-
-    # 训练步数控制
     global_step = 0
-    if args.initial_global_step is not None:
-        global_step = max(0, int(args.initial_global_step))
-    elif args.resume:
-        global_step = cfg.epsilon_decay_steps
-    
-    best_eval_success = float("-inf")
-    best_eval_reward = float("-inf")
+    best_eval_success = 0.0
 
-    interrupted = False
+    print(f"🔥 V7 Curriculum Training Start | Device: {device}")
+
     try:
-        # 使用 trange 显示进度条
-        for ep in trange(cfg.episodes, desc="Training", ncols=100):
+        pbar = trange(cfg.episodes, desc="V7 Training")
+        for ep in pbar:
+            # --- 课程学习核心：动态更新地图与权重 ---
+            if ep % 10 == 0 or env is None:
+                new_scenario = generator.generate(ep)
+                # 动态权重：引导奖励 guide_omega 随轮次缓慢下降 (2.0 -> 0.8)
+                current_omega = max(0.8, 2.0 * (0.95 ** (ep // 100)))
+                
+                rw = RewardWeights(
+                    goal_reward=cfg.goal_reward,
+                    step_penalty=cfg.step_penalty,
+                    risk_lambda=cfg.risk_lambda,
+                    guide_omega=current_omega,
+                    timeout_penalty=cfg.timeout_penalty,
+                    blocked_move_penalty=cfg.blocked_move_penalty
+                )
+                
+                env = RiskAwareGridEnv(
+                    scenario=new_scenario,
+                    observation_size=cfg.observation_size,
+                    max_steps=cfg.max_steps_per_episode,
+                    enemy_jitter=5, # 直接拉满泛化压力
+                    start_jitter=5,
+                    reward_weights=rw,
+                    seed=cfg.seed + ep
+                )
+
             state, _ = env.reset()
-            ep_reward = 0.0
-            ep_risk = 0.0
-            losses: list[float] = []
-            reached_goal = False
+            ep_reward, ep_losses = 0.0, []
 
             for _ in range(cfg.max_steps_per_episode):
-                # 计算各种衰减系数
-                epsilon = linear_schedule(
-                    cfg.epsilon_start, cfg.epsilon_end,
-                    global_step, cfg.epsilon_decay_steps,
-                )
-                heuristic_prob = linear_schedule(
-                    cfg.heuristic_start, cfg.heuristic_end,
-                    global_step, cfg.heuristic_decay_steps,
-                )
-                # PER Beta 衰减，默认为 0.4 -> 1.0
+                epsilon = linear_schedule(cfg.epsilon_start, cfg.epsilon_end, global_step, cfg.epsilon_decay_steps)
                 beta = linear_schedule(0.4, 1.0, global_step, cfg.epsilon_decay_steps)
+                
+                # 启发式选择概率也随全局步数衰减
+                h_prob = linear_schedule(0.6, 0.05, global_step, 600000)
 
-                action = agent.select_action(
-                    state,
-                    epsilon=epsilon,
-                    heuristic_prob=heuristic_prob,
-                    heuristic_fn=env.heuristic_action,
-                )
-
-                next_state, reward, terminated, truncated, info = env.step(action)
-                done = terminated or truncated
-
-                agent.remember(state, action, reward, next_state, done)
-
+                action = agent.select_action(state, epsilon=epsilon, heuristic_prob=h_prob, heuristic_fn=env.heuristic_action)
+                next_state, reward, term, trunc, info = env.step(action)
+                
+                agent.remember(state, action, reward, next_state, term or trunc)
+                
                 if len(replay) >= cfg.min_replay_size:
-                    metrics = agent.learn(beta=beta)
-                    losses.append(metrics["loss"])
+                    m = agent.learn(beta=beta)
+                    ep_losses.append(m["loss"])
 
                 state = next_state
                 ep_reward += reward
-                ep_risk += info.get("risk", 0.0)
                 global_step += 1
+                if term or trunc: break
 
-                if terminated:
-                    reached_goal = True
-                if done:
-                    break
+            # Tensorboard 记录
+            avg_loss = np.mean(ep_losses) if ep_losses else 0
+            writer.add_scalar("Train/Reward", ep_reward, ep)
+            writer.add_scalar("Train/Loss", avg_loss, ep)
+            writer.add_scalar("Params/Guide_Omega", current_omega, ep)
 
-            # 定期评估
+            # 评估与保存
             if (ep + 1) % cfg.eval_interval_episodes == 0:
-                eval_success, eval_reward = evaluate_greedy(
-                    agent=agent, env=eval_env, episodes=cfg.eval_episodes, seed=cfg.seed + (ep + 1) * 100
-                )
+                success, rew = evaluate_greedy(agent, eval_env, cfg.eval_episodes, cfg.seed + ep)
+                writer.add_scalar("Eval/SuccessRate", success, ep)
+                if success >= best_eval_success:
+                    best_eval_success = success
+                    agent.save(checkpoint_dir / "best_model.pt")
+                pbar.set_postfix({"Best_Succ": f"{best_eval_success:.2%}", "Curr_Loss": f"{avg_loss:.4f}"})
 
-                # 更新最佳模型
-                if eval_success >= best_eval_success:
-                    if eval_success > best_eval_success or eval_reward > best_eval_reward:
-                        best_eval_success = eval_success
-                        best_eval_reward = eval_reward
-                        agent.save(checkpoint_dir / "best_model.pt")
-
-                print(
-                    f"\n[Eval] ep={ep + 1:4d} | success={eval_success:.2%} | "
-                    f"avg_reward={eval_reward:8.2f} | best_success={best_eval_success:.2%}"
-                )
-
-            # 定期打印日志
-            if (ep + 1) % 20 == 0:
-                avg_loss = float(np.mean(losses)) if losses else 0.0
-                avg_risk = ep_risk / max(env.step_count, 1)
-                print(
-                    f"Episode {ep + 1:4d} | reward={ep_reward:8.2f} | "
-                    f"avg_risk={avg_risk:6.3f} | loss={avg_loss:7.4f} | "
-                    f"goal={int(reached_goal)} | epsilon={epsilon:.3f}"
-                )
-                
     except KeyboardInterrupt:
-        interrupted = True
-        print("\nTraining interrupted by user. Saving model...")
-        agent.save(checkpoint_dir / "interrupted_model.pt")
-
-    # 保存最终模型
+        print("\nInterrupted. Saving...")
+        agent.save(checkpoint_dir / "interrupted.pt")
+    
     agent.save(checkpoint_dir / "final_model.pt")
-    print(f"Training Complete. Best eval success: {best_eval_success:.2%}")
-
+    writer.close()
 
 if __name__ == "__main__":
     main()
