@@ -50,10 +50,10 @@ class TrainConfig:
     eval_interval_episodes: int = 50   # 每 50 轮评估一次，观察收敛趋势
     eval_episodes: int = 20
     seed: int = 42
-    eval_enemy_jitter: int = 1  
-    eval_start_jitter: int = 1
+    eval_enemy_jitter: int = 2  
+    eval_start_jitter: int = 2
 
-    high_risk_block_threshold: float = 0.8
+    high_risk_block_threshold: float = 0.4
 
 
 def load_scenario(path: str | Path) -> dict[str, Any]:

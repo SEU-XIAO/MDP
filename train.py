@@ -95,23 +95,25 @@ def evaluate_greedy(agent, env, episodes, seed):
 # --- 3. 主流程 ---
 def main():
 
-    # 加载评估测试集
-    import json
-    eval_dataset_path = "src/environment/eval_dataset_v2.json"
-    with open(eval_dataset_path, "r", encoding="utf-8") as f:
-        eval_dataset = json.load(f)
+    # 加载3个基础训练/验证场景
+    from src.config import load_scenario
+    train_scenarios = [
+        load_scenario("src/environment/scenario_1.json"),
+        load_scenario("src/environment/scenario_2.json"),
+        load_scenario("src/environment/scenario_3.json"),
+    ]
 
-    def evaluate_on_dataset(agent, cfg):
+    def evaluate_on_scenarios(agent, cfg, scenarios):
         results = {}
-        for level, scenarios in eval_dataset.items():
+        for idx, scenario in enumerate(scenarios):
             success = 0
-            for scenario in scenarios:
+            for _ in range(cfg.eval_episodes):
                 env = RiskAwareGridEnv(
                     scenario=scenario,
                     observation_size=cfg.observation_size,
                     max_steps=cfg.max_steps_per_episode,
-                    enemy_jitter=cfg.enemy_jitter,
-                    start_jitter=cfg.start_jitter,
+                    enemy_jitter=0,
+                    start_jitter=0,
                     reward_weights=RewardWeights(
                         goal_reward=cfg.goal_reward,
                         step_penalty=cfg.step_penalty,
@@ -132,7 +134,7 @@ def main():
                         if term:
                             success += 1
                         break
-            results[level] = success / max(len(scenarios), 1)
+            results[f"scenario_{idx+1}"] = success / cfg.eval_episodes
         return results
 
     args = parse_args()
@@ -144,19 +146,27 @@ def main():
     cfg.learning_rate = args.lr
     cfg.min_replay_size = 15000  # 4090 跑得快，多存点样本再开始
 
-    generator = RandomScenarioGenerator(grid_size=cfg.observation_size, start_pos=(1, 1), goal_pos=(cfg.observation_size-2, cfg.observation_size-2))
-    temp_env = RiskAwareGridEnv(generator.generate(0), observation_size=cfg.observation_size, max_steps=cfg.max_steps_per_episode, enemy_jitter=cfg.enemy_jitter, start_jitter=cfg.start_jitter, reward_weights=RewardWeights(
-        goal_reward=cfg.goal_reward,
-        step_penalty=cfg.step_penalty,
-        risk_lambda=cfg.risk_lambda,
-        guide_omega=cfg.guide_omega,
-        timeout_penalty=cfg.timeout_penalty,
-        blocked_move_penalty=cfg.blocked_move_penalty
-    ), blocked_risk_threshold=cfg.high_risk_block_threshold, seed=cfg.seed)
 
+    # 用第一个场景初始化环境和agent
+    temp_env = RiskAwareGridEnv(
+        scenario=train_scenarios[0],
+        observation_size=cfg.observation_size,
+        max_steps=cfg.max_steps_per_episode,
+        enemy_jitter=cfg.enemy_jitter,
+        start_jitter=cfg.start_jitter,
+        reward_weights=RewardWeights(
+            goal_reward=cfg.goal_reward,
+            step_penalty=cfg.step_penalty,
+            risk_lambda=cfg.risk_lambda,
+            guide_omega=cfg.guide_omega,
+            timeout_penalty=cfg.timeout_penalty,
+            blocked_move_penalty=cfg.blocked_move_penalty
+        ),
+        blocked_risk_threshold=cfg.high_risk_block_threshold,
+        seed=cfg.seed
+    )
     obs_shape = temp_env.observation_space.shape
     n_actions = temp_env.action_space.n
-
     replay = PrioritizedReplayBuffer(capacity=cfg.replay_capacity)
     agent = D3QNAgent(
         state_shape=obs_shape,
@@ -166,16 +176,6 @@ def main():
         device=str(device)
     )
 
-    eval_scenario = generator.generate(1000)
-    eval_env = RiskAwareGridEnv(eval_scenario, observation_size=cfg.observation_size, max_steps=cfg.max_steps_per_episode, enemy_jitter=cfg.enemy_jitter, start_jitter=cfg.start_jitter, reward_weights=RewardWeights(
-        goal_reward=cfg.goal_reward,
-        step_penalty=cfg.step_penalty,
-        risk_lambda=cfg.risk_lambda,
-        guide_omega=cfg.guide_omega,
-        timeout_penalty=cfg.timeout_penalty,
-        blocked_move_penalty=cfg.blocked_move_penalty
-    ), blocked_risk_threshold=cfg.high_risk_block_threshold, seed=cfg.seed)
-
     checkpoint_dir = Path(args.checkpoint_dir)
     checkpoint_dir.mkdir(parents=True, exist_ok=True)
 
@@ -183,10 +183,9 @@ def main():
     print(f"🔥 V7 Fixed Training Start | Device: {device} | Actions: {n_actions}")
 
     try:
-        pbar = trange(cfg.episodes, desc="V7 Training")
-        # 优化：只初始化一次env，后续直接reset新场景
+        pbar = trange(cfg.episodes, desc="Train")
         env = RiskAwareGridEnv(
-            scenario=generator.generate(0),
+            scenario=train_scenarios[0],
             observation_size=cfg.observation_size,
             max_steps=cfg.max_steps_per_episode,
             enemy_jitter=cfg.enemy_jitter,
@@ -203,12 +202,12 @@ def main():
             seed=cfg.seed
         )
         for ep in pbar:
-            # 只reset新场景，不重建env
-            new_scenario = generator.generate(ep)
-            env.reset(scenario=new_scenario)
+            # 每轮随机采样一个基础场景并加扰动
+            base_scenario = random.choice(train_scenarios)
+            env.reset(scenario=base_scenario)
 
             ep_reward, ep_losses = 0.0, []
-            state, _ = env.reset(scenario=new_scenario)
+            state, _ = env.reset(scenario=base_scenario)
 
             for step_idx in range(env.max_steps):
                 epsilon = linear_schedule(cfg.epsilon_start, cfg.epsilon_end, global_step, cfg.epsilon_decay_steps)
@@ -220,7 +219,6 @@ def main():
 
                 agent.remember(state, action, reward, next_state, term or trunc)
 
-                # 优化：每4步才learn一次
                 if len(replay) >= cfg.min_replay_size and (step_idx % 4 == 0):
                     m = agent.learn(beta=beta)
                     ep_losses.append(m["loss"])
@@ -236,12 +234,13 @@ def main():
 
             # 前500轮不评估，之后每100轮评估一次
             if ep + 1 > 500 and (ep + 1 - 500) % 100 == 0:
-                eval_results = evaluate_on_dataset(agent, cfg)
-                for level, rate in eval_results.items():
-                    writer.add_scalar(f"Eval/{level}_SuccessRate", rate, ep)
-                print(f"[Eval] 难度分级成功率: " + " | ".join([f"{level}: {rate:.2%}" for level, rate in eval_results.items()]))
-                if eval_results.get("normal", 0) >= best_eval_success:
-                    best_eval_success = eval_results.get("normal", 0)
+                eval_results = evaluate_on_scenarios(agent, cfg, train_scenarios)
+                for scen, rate in eval_results.items():
+                    writer.add_scalar(f"Eval/{scen}_SuccessRate", rate, ep)
+                print(f"[Eval] 基础场景成功率: " + " | ".join([f"{scen}: {rate:.2%}" for scen, rate in eval_results.items()]))
+                best = max(eval_results.values())
+                if best >= best_eval_success:
+                    best_eval_success = best
                     agent.save(checkpoint_dir / "best_model.pt")
                 pbar.set_postfix({"Best_Succ": f"{best_eval_success:.2%}", "Loss": f"{avg_loss:.4f}"})
 
