@@ -14,12 +14,12 @@ from gymnasium import spaces
 @dataclass
 class RewardWeights:
     """经过 Dijkstra 逻辑调优后的权重"""
-    goal_reward: float = 200.0         # 增加目标奖励，提高终点诱惑力
-    step_penalty: float = -0.5         # 适度的时间压力
-    risk_lambda: float = 2.5           # 对高风险区域保持警觉
-    guide_omega: float = 1.5           # 强化对 Dijkstra 最优路径的追随
-    timeout_penalty: float = -150.0    # 严厉惩罚超时，防止原地挂机
-    blocked_move_penalty: float = -1.0 # 鼓励探索边缘
+    goal_reward: float = 200.0         # 参数实际由config.py统一管理
+    step_penalty: float = -0.5         # 参数实际由config.py统一管理
+    risk_lambda: float = 2.5           # 参数实际由config.py统一管理
+    guide_omega: float = 1.5           # 参数实际由config.py统一管理
+    timeout_penalty: float = -150.0    # 参数实际由config.py统一管理
+    blocked_move_penalty: float = -1.0 # 参数实际由config.py统一管理
 
 class RiskAwareGridEnv(gym.Env[np.ndarray, int]):
     metadata = {"render_modes": []}
@@ -71,34 +71,50 @@ class RiskAwareGridEnv(gym.Env[np.ndarray, int]):
         self.current_enemies = self.base_enemies
         self.step_count = 0
         self.dijkstra_map = np.zeros((self.world_size, self.world_size))
+        # 预生成观测网格，提升_build_observation速度
+        h = self.observation_size
+        xs = np.linspace(0, self.world_size - 1, h)
+        self.xx, self.yy = np.meshgrid(xs, xs)
 
     def _compute_dijkstra_map(self) -> np.ndarray:
-        """核心改进：计算全图到终点的‘避障成本’图"""
+        """核心改进：向量化计算全图风险，Dijkstra循环查表，极大提速"""
         h, w = self.world_size, self.world_size
+        # --- 提速核心：先一次性向量化计算全图风险 ---
+        xs = np.arange(h)
+        ys = np.arange(w)
+        xx, yy = np.meshgrid(xs, ys, indexing='ij')
+        survival = np.ones((h, w), dtype=np.float32)
+        for enemy in self.base_enemies:
+            ex, ey = enemy["pos"]
+            dist_sq = (xx - ex)**2 + (yy - ey)**2
+            pk = np.zeros_like(survival)
+            for zone in sorted(enemy["detection_zones"], key=lambda z: z["r"]):
+                mask = (dist_sq <= zone["r"]**2) & (pk == 0)
+                pk[mask] = zone["p"]
+            survival *= (1.0 - pk)
+        full_risk_grid = 1.0 - survival
+        # ------------------------------------------
+
         dist_map = np.full((h, w), float('inf'), dtype=np.float32)
         gx, gy = self.goal_pos
         dist_map[gx, gy] = 0.0
-        
         pq = [(0.0, gx, gy)]
-        # 该值需显著高于步长（1.41），确保 Agent 绕路而非硬闯
         risk_weight = 50.0 
 
         while pq:
             d, x, y = heapq.heappop(pq)
-            if d > dist_map[x, y]:
-                continue
-            
+            if d > dist_map[x, y]: continue
             for dx, dy in self.ACTIONS:
                 nx, ny = x + dx, y + dy
                 if 0 <= nx < h and 0 <= ny < w:
                     move_cost = math.sqrt(dx**2 + dy**2)
-                    step_risk = self._risk_at((nx, ny))
-                    # 代价公式：基础距离 + 极高风险溢价
+                    # 提速点：这里直接查表，不再调用 _risk_at
+                    step_risk = full_risk_grid[nx, ny]
                     total_step_cost = move_cost + (step_risk * risk_weight)
-                    
-                    if d + total_step_cost < dist_map[nx, ny]:
-                        dist_map[nx, ny] = d + total_step_cost
-                        heapq.heappush(pq, (dist_map[nx, ny], nx, ny))
+                    new_dist = d + total_step_cost
+                    if new_dist < dist_map[nx, ny]:
+                        dist_map[nx, ny] = new_dist
+                        heapq.heappush(pq, (new_dist, nx, ny))
         return dist_map
 
     def heuristic_action(self, state=None) -> int:
@@ -123,7 +139,16 @@ class RiskAwareGridEnv(gym.Env[np.ndarray, int]):
                 best_action = i
         return best_action
 
-    def reset(self, *, seed: int | None = None, options: dict[str, Any] | None = None) -> tuple[np.ndarray, dict[str, Any]]:
+    def reset(self, *, seed: int | None = None, options: dict[str, Any] | None = None, scenario: dict[str, Any] | None = None) -> tuple[np.ndarray, dict[str, Any]]:
+        # 只在场景变化时重新计算Dijkstra地图，否则复用
+        scenario_changed = False
+        if scenario is not None:
+            self.scenario = scenario
+            self.world_size = int(scenario["map"]["grid_size"])
+            self.start_pos = tuple(scenario["map"]["start_pos"])
+            self.goal_pos = tuple(scenario["map"]["goal_pos"])
+            self.base_enemies = scenario["enemies"]
+            scenario_changed = True
         if seed is not None:
             self.rng.seed(seed)
             self.np_rng = np.random.default_rng(seed)
@@ -131,9 +156,10 @@ class RiskAwareGridEnv(gym.Env[np.ndarray, int]):
         self.step_count = 0
         self.current_enemies = self._randomize_enemies(self.base_enemies)
         self.agent_pos = self._randomize_start(self.start_pos)
-        
-        # 核心：重置后更新代价场
-        self.dijkstra_map = self._compute_dijkstra_map()
+
+        # 只有场景变化时才重新计算Dijkstra地图
+        if scenario_changed:
+            self.dijkstra_map = self._compute_dijkstra_map()
 
         obs = self._build_observation(self.agent_pos)
         info = {"risk": self._risk_at(self.agent_pos), "cost": self.dijkstra_map[self.agent_pos]}
@@ -215,9 +241,7 @@ class RiskAwareGridEnv(gym.Env[np.ndarray, int]):
 
     def _build_observation(self, agent_pos: tuple[int, int]) -> np.ndarray:
         h = self.observation_size
-        xs = np.linspace(0, self.world_size - 1, h)
-        xx, yy = np.meshgrid(xs, xs)
-        
+        xx, yy = self.xx, self.yy  # 直接用预生成网格
         survival = np.ones((h, h), dtype=np.float32)
         for enemy in self.current_enemies:
             ex, ey = enemy["pos"]

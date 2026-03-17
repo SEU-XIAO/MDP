@@ -1,9 +1,0 @@
-{
-  "map": {"grid_size": 64, "start_pos": [5, 5], "goal_pos": [58, 58]},
-  "enemies": [
-    {"id": 1, "pos": [20, 20], "detection_shape": "circle", "detection_zones": [{"r": 10, "p": 0.8}]},
-    {"id": 2, "pos": [40, 40], "detection_shape": "circle", "detection_zones": [{"r": 10, "p": 0.8}]},
-    {"id": 3, "pos": [15, 45], "detection_shape": "circle", "detection_zones": [{"r": 7, "p": 0.6}]},
-    {"id": 4, "pos": [45, 15], "detection_shape": "circle", "detection_zones": [{"r": 7, "p": 0.6}]}
-  ]
-}
