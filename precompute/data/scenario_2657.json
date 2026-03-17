@@ -1,0 +1,176 @@
+{
+  "map": {
+    "grid_size": 64,
+    "start_pos": [
+      1,
+      62
+    ],
+    "goal_pos": [
+      62,
+      1
+    ]
+  },
+  "enemies": [
+    {
+      "id": 1,
+      "pos": [
+        47,
+        13
+      ],
+      "detection_shape": "circle",
+      "comment": "",
+      "detection_zones": [
+        {
+          "r": 4,
+          "p": 0.95
+        },
+        {
+          "r": 6,
+          "p": 0.6
+        },
+        {
+          "r": 8,
+          "p": 0.3
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "pos": [
+        35,
+        15
+      ],
+      "detection_shape": "circle",
+      "comment": "",
+      "detection_zones": [
+        {
+          "r": 4,
+          "p": 0.95
+        },
+        {
+          "r": 6,
+          "p": 0.6
+        },
+        {
+          "r": 8,
+          "p": 0.3
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "pos": [
+        20,
+        26
+      ],
+      "detection_shape": "circle",
+      "comment": "",
+      "detection_zones": [
+        {
+          "r": 4,
+          "p": 0.95
+        },
+        {
+          "r": 6,
+          "p": 0.6
+        },
+        {
+          "r": 8,
+          "p": 0.3
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "pos": [
+        46,
+        26
+      ],
+      "detection_shape": "circle",
+      "comment": "",
+      "detection_zones": [
+        {
+          "r": 4,
+          "p": 0.95
+        },
+        {
+          "r": 6,
+          "p": 0.6
+        },
+        {
+          "r": 8,
+          "p": 0.3
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "pos": [
+        44,
+        41
+      ],
+      "detection_shape": "circle",
+      "comment": "",
+      "detection_zones": [
+        {
+          "r": 4,
+          "p": 0.95
+        },
+        {
+          "r": 6,
+          "p": 0.6
+        },
+        {
+          "r": 8,
+          "p": 0.3
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "pos": [
+        17,
+        44
+      ],
+      "detection_shape": "circle",
+      "comment": "",
+      "detection_zones": [
+        {
+          "r": 4,
+          "p": 0.95
+        },
+        {
+          "r": 6,
+          "p": 0.6
+        },
+        {
+          "r": 8,
+          "p": 0.3
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "pos": [
+        35,
+        55
+      ],
+      "detection_shape": "circle",
+      "comment": "",
+      "detection_zones": [
+        {
+          "r": 4,
+          "p": 0.95
+        },
+        {
+          "r": 6,
+          "p": 0.6
+        },
+        {
+          "r": 8,
+          "p": 0.3
+        }
+      ]
+    }
+  ]
+}

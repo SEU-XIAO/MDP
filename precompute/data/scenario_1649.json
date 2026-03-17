@@ -1,0 +1,130 @@
+{
+  "map": {
+    "grid_size": 64,
+    "start_pos": [
+      1,
+      62
+    ],
+    "goal_pos": [
+      62,
+      1
+    ]
+  },
+  "enemies": [
+    {
+      "id": 1,
+      "pos": [
+        12,
+        14
+      ],
+      "detection_shape": "circle",
+      "comment": "",
+      "detection_zones": [
+        {
+          "r": 4,
+          "p": 0.95
+        },
+        {
+          "r": 6,
+          "p": 0.6
+        },
+        {
+          "r": 8,
+          "p": 0.3
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "pos": [
+        17,
+        50
+      ],
+      "detection_shape": "circle",
+      "comment": "",
+      "detection_zones": [
+        {
+          "r": 4,
+          "p": 0.95
+        },
+        {
+          "r": 6,
+          "p": 0.6
+        },
+        {
+          "r": 8,
+          "p": 0.3
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "pos": [
+        43,
+        11
+      ],
+      "detection_shape": "circle",
+      "comment": "",
+      "detection_zones": [
+        {
+          "r": 4,
+          "p": 0.95
+        },
+        {
+          "r": 6,
+          "p": 0.6
+        },
+        {
+          "r": 8,
+          "p": 0.3
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "pos": [
+        51,
+        51
+      ],
+      "detection_shape": "circle",
+      "comment": "",
+      "detection_zones": [
+        {
+          "r": 4,
+          "p": 0.95
+        },
+        {
+          "r": 6,
+          "p": 0.6
+        },
+        {
+          "r": 8,
+          "p": 0.3
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "pos": [
+        34,
+        33
+      ],
+      "detection_shape": "circle",
+      "comment": "",
+      "detection_zones": [
+        {
+          "r": 4,
+          "p": 0.95
+        },
+        {
+          "r": 6,
+          "p": 0.6
+        },
+        {
+          "r": 8,
+          "p": 0.3
+        }
+      ]
+    }
+  ]
+}

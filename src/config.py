@@ -23,9 +23,9 @@ class TrainConfig:
     min_replay_size: int = 10_000      # 积累足够样本再开始训练，确保初始批次具有代表性
     
     # --- 探索策略 (Exploration) ---
-    epsilon_start: float = 1.0
-    epsilon_end: float = 0.02          # 训练后期给予模型更高的决策信任度
-    epsilon_decay_steps: int = 250_000 # 在训练中期左右完成探索，随后进入精细化路径优化
+    epsilon_start: float = 0.3
+    epsilon_end: float = 0.05          # 训练后期给予模型更高的决策信任度
+    epsilon_decay_steps: int = 80_000 # 在训练中期左右完成探索，随后进入精细化路径优化
     
     # --- 启发式引导 (Heuristic/Dijkstra) ---
     # 这部分参数将控制 Dijkstra 引导在训练过程中的衰减（如果你的逻辑中有用到）
@@ -44,8 +44,8 @@ class TrainConfig:
     guide_omega: float = 2.5           # 强化引导权重：Dijkstra 提供的路径是全局最优，值得高度追随
     
     # --- 环境与评估 ---
-    enemy_jitter: int = 1
-    start_jitter: int = 1
+    enemy_jitter: int = 0
+    start_jitter: int = 0
     observation_size: int = 64
     eval_interval_episodes: int = 50   # 每 50 轮评估一次，观察收敛趋势
     eval_episodes: int = 20

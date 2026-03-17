@@ -34,13 +34,14 @@ class RiskAwareGridEnv(gym.Env[np.ndarray, int]):
         self,
         scenario: dict[str, Any],
         observation_size: int = 64,
-        max_steps: int = 400,          # 给 Dijkstra 绕路留足空间
+        max_steps: int = 400,
         enemy_jitter: int = 1,
         start_jitter: int = 1,
         reward_weights: RewardWeights | None = None,
         goal_sigma: float = 10.0,
         blocked_risk_threshold: float | None = None,
         seed: int | None = None,
+        pregenerated_data: dict | None = None,
     ) -> None:
         super().__init__()
         self.scenario = scenario
@@ -67,14 +68,15 @@ class RiskAwareGridEnv(gym.Env[np.ndarray, int]):
         self.rng = random.Random(seed)
         self.np_rng = np.random.default_rng(seed)
 
+        # DataManager集成
+        from src.environment.data_manager import DataManager
+        self.data_manager = DataManager(pregenerated_data) if pregenerated_data else None
+
         self.agent_pos = self.start_pos
         self.current_enemies = self.base_enemies
         self.step_count = 0
         self.dijkstra_map = np.zeros((self.world_size, self.world_size))
-        # 预生成观测网格，提升_build_observation速度
-        h = self.observation_size
-        xs = np.linspace(0, self.world_size - 1, h)
-        self.xx, self.yy = np.meshgrid(xs, xs)
+        self.obs_buffer = np.zeros((3, self.observation_size, self.observation_size), dtype=np.float32)
 
     def _compute_dijkstra_map(self) -> np.ndarray:
         """核心改进：向量化计算全图风险，Dijkstra循环查表，极大提速"""
@@ -139,7 +141,7 @@ class RiskAwareGridEnv(gym.Env[np.ndarray, int]):
                 best_action = i
         return best_action
 
-    def reset(self, *, seed: int | None = None, options: dict[str, Any] | None = None, scenario: dict[str, Any] | None = None) -> tuple[np.ndarray, dict[str, Any]]:
+    def reset(self, *, seed: int | None = None, options: dict[str, Any] | None = None, scenario: dict[str, Any] | None = None, dijkstra_map: np.ndarray | None = None, pregenerated_data: dict | None = None) -> tuple[np.ndarray, dict[str, Any]]:
         # 只在场景变化时重新计算Dijkstra地图，否则复用
         scenario_changed = False
         if scenario is not None:
@@ -154,14 +156,33 @@ class RiskAwareGridEnv(gym.Env[np.ndarray, int]):
             self.np_rng = np.random.default_rng(seed)
 
         self.step_count = 0
-        self.current_enemies = self._randomize_enemies(self.base_enemies)
-        self.agent_pos = self._randomize_start(self.start_pos)
+        if pregenerated_data is not None:
+            # 直接复用预生成数据
+            self.current_enemies = pregenerated_data.get('enemies', self.base_enemies)
+            self.agent_pos = tuple(pregenerated_data.get('agent_pos', self.start_pos))
+        else:
+            self.current_enemies = self._randomize_enemies(self.base_enemies)
+            self.agent_pos = self._randomize_start(self.start_pos)
 
-        # 只有场景变化时才重新计算Dijkstra地图
-        if scenario_changed:
+        # 优先使用DataManager的查表与切片
+        if pregenerated_data is not None:
+            from src.environment.data_manager import DataManager
+            self.data_manager = DataManager(pregenerated_data)
+            self.dijkstra_map = self.data_manager.get_dijkstra_map()
+            self.full_risk_grid = self.data_manager.get_full_risk_grid()
+            self.coord_map = self.data_manager.coord_map
+            self.obs_buffer[0:2] = self.data_manager.get_obs_layers()
+        elif dijkstra_map is not None:
+            self.dijkstra_map = dijkstra_map
+        elif scenario_changed:
             self.dijkstra_map = self._compute_dijkstra_map()
 
-        obs = self._build_observation(self.agent_pos)
+        # 初始化agent_map
+        self.obs_buffer[2] = 0
+        ax, ay = self._world_to_obs(self.agent_pos)
+        self.obs_buffer[2, ay, ax] = 1.0
+
+        obs = self.obs_buffer.copy()
         info = {"risk": self._risk_at(self.agent_pos), "cost": self.dijkstra_map[self.agent_pos]}
         return obs, info
 
@@ -173,7 +194,7 @@ class RiskAwareGridEnv(gym.Env[np.ndarray, int]):
         dx, dy = self.ACTIONS[action]
         nx = int(np.clip(prev_pos[0] + dx, 0, self.world_size - 1))
         ny = int(np.clip(prev_pos[1] + dy, 0, self.world_size - 1))
-        
+
         blocked = self._is_blocked_by_risk((nx, ny))
         if blocked:
             self.agent_pos = prev_pos
@@ -196,7 +217,12 @@ class RiskAwareGridEnv(gym.Env[np.ndarray, int]):
         terminated = self.agent_pos == self.goal_pos
         truncated = self.step_count >= self.max_steps
 
-        obs = self._build_observation(self.agent_pos)
+        # 只更新agent_map
+        self.obs_buffer[2] = 0
+        ax, ay = self._world_to_obs(self.agent_pos)
+        self.obs_buffer[2, ay, ax] = 1.0
+
+        obs = self.obs_buffer.copy()
         info = {
             "risk": risk_prob,
             "dijkstra_cost": curr_cost,
@@ -207,18 +233,25 @@ class RiskAwareGridEnv(gym.Env[np.ndarray, int]):
         return obs, float(reward), terminated, truncated, info
 
     def _risk_at(self, pos: tuple[int, int]) -> float:
-        px, py = pos
-        survival = 1.0
-        for enemy in self.current_enemies:
-            ex, ey = enemy["pos"]
-            dist = math.dist((px, py), (ex, ey))
-            pk = 0.0
-            for zone in sorted(enemy["detection_zones"], key=lambda z: z["r"]):
-                if dist <= zone["r"]:
-                    pk = float(zone["p"])
-                    break
-            survival *= 1.0 - pk
-        return float(1.0 - survival)
+        # 查表，彻底消除遍历
+        if hasattr(self, 'full_risk_grid'):
+            return float(self.full_risk_grid[pos[0], pos[1]])
+        elif hasattr(self, 'data_manager') and self.data_manager is not None:
+            return self.data_manager.get_risk(pos)
+        else:
+            # 兼容旧逻辑
+            px, py = pos
+            survival = 1.0
+            for enemy in self.current_enemies:
+                ex, ey = enemy["pos"]
+                dist = math.dist((px, py), (ex, ey))
+                pk = 0.0
+                for zone in sorted(enemy["detection_zones"], key=lambda z: z["r"]):
+                    if dist <= zone["r"]:
+                        pk = float(zone["p"])
+                        break
+                survival *= 1.0 - pk
+            return float(1.0 - survival)
 
     def _is_blocked_by_risk(self, pos: tuple[int, int]) -> bool:
         if self.blocked_risk_threshold is None: return False
@@ -235,30 +268,18 @@ class RiskAwareGridEnv(gym.Env[np.ndarray, int]):
         return nx, ny
 
     def _world_to_obs(self, pos: tuple[int, int]) -> tuple[int, int]:
-        ox = int(round(pos[0] * (self.observation_size - 1) / (self.world_size - 1)))
-        oy = int(round(pos[1] * (self.observation_size - 1) / (self.world_size - 1)))
-        return ox, oy
+        # 查表，彻底消除浮点运算
+        if hasattr(self, 'coord_map'):
+            ox = self.coord_map[pos[0]]
+            oy = self.coord_map[pos[1]]
+            return ox, oy
+        elif hasattr(self, 'data_manager') and self.data_manager is not None:
+            return self.data_manager.get_coord(pos)
+        else:
+            ox = int(round(pos[0] * (self.observation_size - 1) / (self.world_size - 1)))
+            oy = int(round(pos[1] * (self.observation_size - 1) / (self.world_size - 1)))
+            return ox, oy
 
     def _build_observation(self, agent_pos: tuple[int, int]) -> np.ndarray:
-        h = self.observation_size
-        xx, yy = self.xx, self.yy  # 直接用预生成网格
-        survival = np.ones((h, h), dtype=np.float32)
-        for enemy in self.current_enemies:
-            ex, ey = enemy["pos"]
-            dist = np.sqrt((xx - ex) ** 2 + (yy - ey) ** 2)
-            pk = np.zeros_like(dist)
-            for zone in sorted(enemy["detection_zones"], key=lambda z: z["r"]):
-                mask = (pk == 0.0) & (dist <= zone["r"])
-                pk[mask] = zone["p"]
-            survival *= 1.0 - pk
-        risk_map = 1.0 - survival
-
-        gx, gy = self._world_to_obs(self.goal_pos)
-        dist_goal = np.sqrt((np.arange(h)[:,None] - gy)**2 + (np.arange(h) - gx)**2)
-        goal_map = np.exp(-dist_goal / self.goal_sigma)
-
-        agent_map = np.zeros((h, h), dtype=np.float32)
-        ax, ay = self._world_to_obs(agent_pos)
-        agent_map[ay, ax] = 1.0
-
-        return np.stack([risk_map, goal_map, agent_map], axis=0).astype(np.float32)
+        # 兼容旧逻辑，实际已用obs_buffer
+        return self.obs_buffer.copy()
